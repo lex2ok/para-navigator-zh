@@ -1,0 +1,20 @@
+{
+  "name": "para-navigator",
+  "version": "0.1.0",
+  "description": "基于 PARA 的 Obsidian 侧边栏导航器。",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^10.11.0",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "obsidian": "^1.9.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.70.0"
+  }
+}
