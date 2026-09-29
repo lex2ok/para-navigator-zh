@@ -1,20 +1,12 @@
 import { Plugin, MarkdownView, Notice, TFile, TFolder } from "obsidian";
-import type { TAbstractFile } from "obsidian";
 import { NavigatorView, VIEW_TYPE_NAVIGATOR } from "./navigator-view";
 import { StatsView, VIEW_TYPE_STATS } from "./stats-view";
 import {
   QuickAddTaskModal,
-  TODO_INDEX_KEY,
-  insertTaskIntoTodoNote,
-  ensureTodoNote,
-  migrateTaskNotes,
-  parseTodoRef,
-  readSourceLineChecked,
-  refKey,
-  refreshTodoNote,
-  setSourceLineChecked,
-} from "./todo";
-import type { NewTaskInput } from "./todo";
+  TasksView,
+  VIEW_TYPE_TASKS,
+} from "./tasks-view";
+import type { NewTaskOptions, TaskTab } from "./tasks-view";
 import { ParaNavigatorSettingTab } from "./settings-tab";
 import { baseFileContent } from "./bases";
 import { detectParaPaths } from "./para-detect";
@@ -28,14 +20,6 @@ export default class ParaNavigatorPlugin extends Plugin {
   settings!: ParaNavigatorSettings;
   private prevNewFileLocation: unknown = null;
   private prevNewFileFolderPath: unknown = null;
-
-  /** 待办写回快照：写回引用 -> 勾选状态 */
-  private todoChecked = new Map<string, boolean>();
-  /** 待办笔记最新全文（识别我们自己的写入） */
-  private lastTodoContent = "";
-  /** 今天到期的未完成待办数（含逾期，供导航栏计数） */
-  todoDueTodayCount = 0;
-  private todoTimer: number | null = null;
 
   async onload(): Promise<void> {
     const data = (await this.loadData()) as Partial<ParaNavigatorSettings> | null;
@@ -52,9 +36,10 @@ export default class ParaNavigatorPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_NAVIGATOR, (leaf) => new NavigatorView(leaf, this));
     this.registerView(VIEW_TYPE_STATS, (leaf) => new StatsView(leaf, this));
+    this.registerView(VIEW_TYPE_TASKS, (leaf) => new TasksView(leaf, this));
 
     this.addRibbonIcon("compass", "打开 PARA 导航", () => void this.activateNavigator());
-    this.addRibbonIcon("list-todo", "打开待办笔记", () => void this.openTodoNote());
+    this.addRibbonIcon("list-todo", "打开任务面板", () => void this.openTasks("today"));
 
     this.addCommand({
       id: "open-navigator",
@@ -62,9 +47,9 @@ export default class ParaNavigatorPlugin extends Plugin {
       callback: () => void this.activateNavigator(),
     });
     this.addCommand({
-      id: "open-todo",
-      name: "打开待办笔记",
-      callback: () => void this.openTodoNote(),
+      id: "open-tasks",
+      name: "打开任务面板",
+      callback: () => void this.openTasks("today"),
     });
     this.addCommand({
       id: "quick-add-task",
@@ -81,22 +66,6 @@ export default class ParaNavigatorPlugin extends Plugin {
     }
 
     this.addSettingTab(new ParaNavigatorSettingTab(this.app, this));
-
-    // 关掉最后一个标签页时不留空白页，直接回到主页看板。
-    this.registerEvent(
-      this.app.workspace.on("layout-change", () => this.redirectEmptyLeaves())
-    );
-
-    // 待办笔记自动维护：库变化时防抖重建汇总区；待办笔记自身的修改走勾选写回。
-    const scheduleTodo = () => this.scheduleTodoRefresh();
-    this.registerEvent(this.app.vault.on("create", scheduleTodo));
-    this.registerEvent(this.app.vault.on("delete", scheduleTodo));
-    this.registerEvent(this.app.vault.on("rename", scheduleTodo));
-    this.registerEvent(this.app.vault.on("modify", (file) => this.onVaultModify(file)));
-    this.registerEvent(this.app.metadataCache.on("changed", scheduleTodo));
-    this.app.workspace.onLayoutReady(() => {
-      void this.initTodoNote();
-    });
 
     this.setInboxAsNewFileLocation();
   }
@@ -245,124 +214,53 @@ export default class ParaNavigatorPlugin extends Plugin {
     await workspace.revealLeaf(leaf);
   }
 
-  /**
-   * 把空白标签页（view type "empty"）替换为主页看板：
-   * 关闭最后一个标签页（或新建空白标签页）后直接回到主页，而不是停在空白页。
-   */
-  private redirectEmptyLeaves(): void {
-    const leaves = this.app.workspace.getLeavesOfType("empty");
-    for (const leaf of leaves) {
-      void leaf.setViewState({
-        type: VIEW_TYPE_STATS,
-        active: true,
-        state: { home: true, name: "主页", icon: "home" },
-      });
+  /** 在右侧边栏打开任务面板（已打开则聚焦），并切到指定页签。 */
+  async openTasks(tab: TaskTab = "today"): Promise<void> {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(VIEW_TYPE_TASKS)[0];
+    if (!leaf) {
+      const right = workspace.getRightLeaf(false);
+      if (!right) return;
+      await right.setViewState({ type: VIEW_TYPE_TASKS, active: true });
+      leaf = right;
     }
-  }
-
-  /** 打开待办笔记（不存在则创建）。待办笔记是普通笔记，可拖到任意项目 / 领域。 */
-  async openTodoNote(): Promise<void> {
-    const note = await this.ensureTodo();
-    this.openFileReusingTab(note);
-  }
-
-  private async ensureTodo(): Promise<TFile> {
-    const inbox = this.settings.folders.find((folder) => folder.id === "inbox");
-    return ensureTodoNote(this.app, inbox?.path ?? "");
-  }
-
-  /** 布局就绪后：确保待办笔记、一次性迁移旧任务笔记、初始重建汇总区。 */
-  private async initTodoNote(): Promise<void> {
-    await this.ensureTodo();
-    if (!this.settings.taskNotesMigrated) {
-      const n = await migrateTaskNotes(this.app);
-      this.settings.taskNotesMigrated = true;
-      await this.saveSettings();
-      if (n > 0) new Notice(`已将 ${n} 条任务笔记转为待办条目`);
-    }
-    await this.refreshTodoNoteNow();
-  }
-
-  private scheduleTodoRefresh(): void {
-    if (this.todoTimer !== null) window.clearTimeout(this.todoTimer);
-    this.todoTimer = window.setTimeout(() => {
-      this.todoTimer = null;
-      void this.refreshTodoNoteNow();
-    }, 600);
-  }
-
-  private async refreshTodoNoteNow(): Promise<void> {
-    const result = await refreshTodoNote(this.app, this.settings.folders);
-    this.todoChecked = result.checked;
-    this.lastTodoContent = result.content;
-    this.todoDueTodayCount = result.dueTodayCount;
-    this.refreshNavigatorCounts();
-  }
-
-  /** 待办数据变化后刷新导航栏的任务计数。 */
-  private refreshNavigatorCounts(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_NAVIGATOR)) {
-      if (leaf.view instanceof NavigatorView) leaf.view.refreshCounts();
-    }
-  }
-
-  private onVaultModify(file: TAbstractFile): void {
-    if (file instanceof TFile) {
-      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-      if (fm?.[TODO_INDEX_KEY] === true) {
-        void this.handleTodoNoteModify(file);
-        return;
-      }
-    }
-    this.scheduleTodoRefresh();
-  }
-
-  /**
-   * 待办笔记被用户修改：找出勾选翻转的汇总项，写回原笔记。
-   * 我们自己的写入（内容与快照一致）直接忽略。
-   * 写回前先读来源笔记的当前状态做二次确认：来源已经是目标状态时，
-   * 说明只是汇总重建在"追"来源的变化，更新快照即可，不写回也不打扰用户。
-   */
-  private async handleTodoNoteModify(file: TFile): Promise<void> {
-    const content = await this.app.vault.read(file);
-    if (content === this.lastTodoContent) return;
-    let synced = 0;
-    for (const ln of content.split("\n")) {
-      const parsed = parseTodoRef(ln);
-      if (!parsed) continue;
-      const key = refKey(parsed.path, parsed.line);
-      const prev = this.todoChecked.get(key);
-      if (prev === undefined || prev === parsed.checked) continue;
-      const srcChecked = await readSourceLineChecked(this.app, parsed.path, parsed.line);
-      if (srcChecked === null) continue; // 行号错位：等下次重建刷新引用
-      if (srcChecked === parsed.checked) {
-        this.todoChecked.set(key, parsed.checked);
-        continue;
-      }
-      if (await setSourceLineChecked(this.app, parsed.path, parsed.line, parsed.checked)) {
-        this.todoChecked.set(key, parsed.checked);
-        synced++;
-      }
-    }
-    if (synced > 0) new Notice(`已同步 ${synced} 项到原笔记`);
-    // 来源笔记的 modify 事件会触发防抖重建，这里再排一次确保快照新鲜。
-    this.scheduleTodoRefresh();
+    if (leaf.view instanceof TasksView) leaf.view.setTab(tab);
+    await workspace.revealLeaf(leaf);
   }
 
   promptQuickAddTask(): void {
-    new QuickAddTaskModal(this.app, (input) => void this.quickAddTask(input)).open();
+    const inbox = this.settings.folders.find((folder) => folder.id === "inbox");
+    new QuickAddTaskModal(
+      this.app,
+      this.settings.folders,
+      inbox?.path ?? "",
+      (opts) => void this.quickAddTask(opts)
+    ).open();
   }
 
-  /** 快速新建任务：追加到待办笔记的手工区（汇总区之前）。 */
-  async quickAddTask(input: NewTaskInput): Promise<void> {
-    const note = await this.ensureTodo();
-    const clean = input.title.replace(/[\\/:*?"<>|]/g, "").trim() || "未命名任务";
-    const line = `- [ ] ${clean}${input.due ? ` 📅 ${input.due}` : ""}`;
-    const next = await insertTaskIntoTodoNote(this.app, note, line);
-    this.lastTodoContent = next;
-    new Notice("已添加到待办");
-    this.scheduleTodoRefresh();
-    this.openFileReusingTab(note);
+  /**
+   * 新建任务：创建一条独立的任务笔记（frontmatter 标记 task: true）。
+   * 任务笔记就是普通笔记，可在导航器里拖进项目 / 领域。
+   */
+  async quickAddTask(opts: NewTaskOptions): Promise<void> {
+    const folder = this.app.vault.getAbstractFileByPath(opts.folderPath);
+    if (!(folder instanceof TFolder)) {
+      new Notice("目标文件夹不存在，请先创建或映射。");
+      return;
+    }
+    const clean = opts.title.replace(/[\\/:*?"<>|]/g, "").trim() || "未命名任务";
+    let name = clean;
+    let i = 2;
+    while (this.app.vault.getAbstractFileByPath(`${folder.path}/${name}.md`)) {
+      name = `${clean} ${i++}`;
+    }
+    const fm = ["---", "task: true"];
+    if (opts.due) fm.push(`due: ${opts.due}`);
+    if (opts.repeat) fm.push(`repeat: ${opts.repeat}`);
+    fm.push("done: false", "---", "");
+    const file = await this.app.vault.create(`${folder.path}/${name}.md`, fm.join("\n"));
+    new Notice("已创建任务");
+    this.openFileReusingTab(file);
   }
 
   /**

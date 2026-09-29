@@ -1,50 +1,43 @@
 # PARA Navigator（中文版）
 
-基于 PARA 的 Obsidian 侧边栏导航器，支持按文件夹生成 Bases 表格与统计看板。
+基于 PARA 方法论的 Obsidian 侧边栏导航插件：五大文件夹（收件箱 / 项目 / 领域 / 资源 / 归档）的树形导航、统计看板、任务管理。
 
-PARA Navigator 把你的 PARA 文件夹结构（收件箱 / 项目 / 领域 / 资源 / 归档）变成侧边栏中的笔记树。树中每个节点都是一条笔记：文件夹由它的文件夹笔记（`项目/我的项目/我的项目.md`）表示，因此浏览和搭建层级永远离不开 Markdown。
-
-> 本仓库是 [HJXArthurAtlas/PARA-Navigator](https://github.com/hjxarthuratlas/PARA-Navigator) 的中文本地化版本：全部界面文案、命令、通知、看板与文档均为中文，emoji 搜索支持中文关键词，默认文件夹名为中文（收件箱 / 项目 / 领域 / 资源 / 归档）。
+上游原版：[hjxarthuratlas/PARA-Navigator](https://github.com/hjxarthuratlas/PARA-Navigator)（英文）。本仓库为中文 fork，界面文案、设置页、命令、通知均为中文，并新增了任务管理与主页看板。
 
 ## 功能
 
-- **PARA 侧边栏树** —— 收件箱、项目、领域、资源、归档在一个面板中。加载时自动检测顶层文件夹，容忍数字前缀（`1-项目`）和中英文文件夹名；路径可在设置中修改。
-- **文件夹笔记层级** —— 内联创建笔记、文件夹和子树。文件夹的笔记（`X/X.md`）是它的入口；子项都放在文件夹里。
-- **叶子转文件夹** —— 随时把叶子笔记 `P/X.md` 转换为文件夹笔记 `P/X/X.md`；全库链接自动更新。
-- **收件箱优先捕获** —— 原生"新建笔记"会落到收件箱，而不是库根目录。
-- **拖拽排序** —— 每个文件夹的子项自定义排序，重启后依然保留。
-- **图标与颜色** —— 给任意节点选 Lucide 图标和名称颜色（emoji 搜索支持中文关键词）。
-- **Bases 看板** —— 一键按文件夹生成 `.base` 表格（按需生成到可配置的文件夹，已存在的文件永不覆盖）。
-- **统计看板** —— 任意 PARA 文件夹的笔记数、子文件夹数、字数、未完成/已完成任务、热门标签和最近修改的笔记。
-- **待办笔记** —— 插件自动生成并维护一页真实的「待办」笔记（`todo-index: true`）：统计 + 按文件夹分组的待办清单。汇总区自动重建，汇总区之外的手工内容不动；在待办笔记里勾选会**写回原笔记**。待办笔记就是普通笔记，可**拖拽到任意项目 / 领域**。
-  - 任务就是各笔记里的 `- [ ]` / `- [x]` 清单项，日期写法 `📅 2026-10-05` 或 `@2026-10-05`。
-  - **主页任务板块** —— 今天到期（含逾期）的待办条目，可直接勾选，点标题打开来源笔记。
-  - **快速新建任务** —— 命令面板运行「快速新建任务」：填标题、选截止日期，一键追加到待办笔记。
-  - 旧版「一笔记一任务」（`task: true`）的笔记会在首次启动时自动转为清单条目（正文和 frontmatter 其余部分保留）。
-- **标签页复用** —— 打开已打开的文件会聚焦已有标签页，不会重复打开。
+- 📂 PARA 侧边栏导航：文件夹树、拖拽移动笔记、计数徽标
+- 🏠 主页看板：全库总览卡片、今日任务、文件夹一览、最近修改（自动刷新）
+- 📊 文件夹看板：点文件夹整行进入，与看板共用一个标签页、不叠加
+- ✅ 任务管理：一笔记一任务，支持截止日期、重复任务（每天/每周/每月）、拖拽归类
+- 📑 Bases 表格：每个文件夹自动生成 `.base` 表格视图
 
-## 使用方法
+## 安装（推荐：BRAT）
 
-1. 安装并启用插件，点击功能区图标或在命令面板运行「PARA Navigator：打开导航」打开导航器；点 ✓ 图标或运行「打开待办笔记」进入待办笔记；命令面板运行「快速新建任务」一键添加待办。
-2. 如果顶层文件夹没有被自动检测到，在「设置 → PARA Navigator」中调整路径，或使用**重新检测文件夹** / **创建 PARA 文件夹**。
-3. 右键任意节点：新建笔记、新建文件夹、删除（带确认）、转为文件夹笔记、图标/颜色选择器、看板快捷入口。
+1. 在 Obsidian 设置 → 第三方插件 → 浏览，搜索安装 **BRAT** 并启用。
+2. 打开 BRAT 设置 → Add Beta plugin，粘贴本仓库地址并确认。
+3. 在插件列表启用 **PARA Navigator**。
+4. 以后更新：在 BRAT 面板点 Check for updates → Update，一键完成。
 
-## 安装
+## 手动安装
 
-审核通过后，可从 Obsidian 社区插件列表安装：「设置 → 第三方插件 → 浏览」，搜索 "PARA Navigator"。
+1. 从 [Releases](../../releases) 下载最新版的 `main.js`、`manifest.json`、`styles.css`。
+2. 放到库的 `.obsidian/plugins/para-navigator/` 目录下。
+3. 重启 Obsidian，在第三方插件中启用。
 
-手动安装：把发布包中的 `main.js`、`manifest.json`、`styles.css` 放到你库的 `.obsidian/plugins/para-navigator/` 目录下，重启 Obsidian 后启用。
-
-## 开发
+## 本地构建
 
 ```bash
-bun install
-bun run dev     # 监听模式，同步到你的开发库
-bun run build   # 类型检查 + 生产构建 main.js
+npm install
+npm run build   # 输出 main.js（production）
 ```
 
-发布使用 esbuild 构建；发布包包含 `main.js`、`manifest.json` 和 `styles.css`。
+设置环境变量 `OBSIDIAN_PLUGIN_DIR` 可在构建后自动同步到指定库的插件目录：
 
-## 许可证
+```bash
+OBSIDIAN_PLUGIN_DIR="/path/to/vault/.obsidian/plugins/para-navigator" npm run build
+```
 
-[MIT](LICENSE)
+## 致谢
+
+- 原作者 [@HJXArthurAtlas](https://github.com/HJXArthurAtlas) 的 [PARA-Navigator](https://github.com/hjxarthuratlas/PARA-Navigator)

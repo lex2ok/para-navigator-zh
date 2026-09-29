@@ -1,7 +1,7 @@
 {
   "id": "para-navigator",
   "name": "PARA Navigator",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "minAppVersion": "1.13.0",
   "description": "基于 PARA 的侧边栏导航器，支持按文件夹生成 Bases 表格与统计看板。",
   "author": "arthuratlas",

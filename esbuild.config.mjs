@@ -5,11 +5,9 @@ import { join } from "node:path";
 
 const prod = process.argv[2] === "production";
 
-// Runtime files are copied here after every build so the vault always runs
-// the latest code. Override with OBSIDIAN_PLUGIN_DIR for another vault.
-const pluginDir =
-  process.env.OBSIDIAN_PLUGIN_DIR ??
-  "/Users/arthuratlas/obsidian/Brain/.obsidian/plugins/para-navigator";
+// 只有显式设置 OBSIDIAN_PLUGIN_DIR 时才把构建产物同步到本地库；
+// 默认只在当前目录输出 main.js（供打 Release 包用）。
+const pluginDir = process.env.OBSIDIAN_PLUGIN_DIR ?? "";
 
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
@@ -40,8 +38,7 @@ const context = await esbuild.context({
 });
 
 const syncToVault = () => {
-  // CI runners have no local vault; release builds must not touch the filesystem.
-  if (process.env.CI === "true") return;
+  if (!pluginDir) return;
   mkdirSync(pluginDir, { recursive: true });
   for (const file of ["main.js", "manifest.json", "styles.css"]) {
     copyFileSync(file, join(pluginDir, file));

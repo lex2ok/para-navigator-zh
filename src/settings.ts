@@ -19,8 +19,6 @@ export interface ParaNavigatorSettings {
   nodeIcons: Record<string, string>;
   /** 各路径的名称显示颜色，全部层级适用 */
   nameColors: Record<string, string>;
-  /** 旧任务笔记（task: true）是否已迁移为清单条目 */
-  taskNotesMigrated: boolean;
 }
 
 export const DEFAULT_SETTINGS: ParaNavigatorSettings = {
@@ -35,5 +33,4 @@ export const DEFAULT_SETTINGS: ParaNavigatorSettings = {
   sortOrder: {},
   nodeIcons: {},
   nameColors: {},
-  taskNotesMigrated: false,
 };
