@@ -757,7 +757,7 @@
   height: 14px;
 }
 
-/* 主页看板：今日任务列表 */
+/* 主页看板：任务列表 */
 .para-home-tasks {
   display: flex;
   flex-direction: column;
@@ -800,11 +800,41 @@
   font-weight: 600;
 }
 
-/* 主页看板：文件夹一览的行可点击 */
-.para-home-folder-row {
-  cursor: pointer;
+/* 主页看板：进行中的项目列表 */
+.para-home-projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
 }
 
-.para-home-folder-row:hover td {
+.para-home-project {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.para-home-project:hover {
   background: var(--background-modifier-hover);
+}
+
+.para-home-project-name {
+  flex: 1;
+  cursor: pointer;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.para-home-project-name:hover {
+  color: var(--text-accent);
+}
+
+.para-home-project-latest {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  white-space: nowrap;
 }

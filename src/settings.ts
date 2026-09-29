@@ -23,7 +23,7 @@ export interface ParaNavigatorSettings {
 
 export const DEFAULT_SETTINGS: ParaNavigatorSettings = {
   folders: [
-    { id: "inbox", name: "收件箱", path: "收件箱", icon: "inbox" },
+    { id: "inbox", name: "收集", path: "收集", icon: "inbox" },
     { id: "projects", name: "项目", path: "项目", icon: "rocket" },
     { id: "areas", name: "领域", path: "领域", icon: "layers" },
     { id: "resources", name: "资源", path: "资源", icon: "library" },

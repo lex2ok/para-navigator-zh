@@ -6,7 +6,7 @@ import type { ParaNavigatorSettings } from "./settings";
  * 容忍数字前缀如 "0-收件箱" 或 "1-项目"。
  */
 const PATTERNS: Record<string, RegExp> = {
-  inbox: /^(\d+[\s\-_.]*)?(inbox|收集箱|收件箱|闪念)$/i,
+  inbox: /^(\d+[\s\-_.]*)?(inbox|收集箱|收集|收件箱|闪念)$/i,
   projects: /^(\d+[\s\-_.]*)?(projects?|项目)$/i,
   areas: /^(\d+[\s\-_.]*)?(areas?|领域|职责)$/i,
   resources: /^(\d+[\s\-_.]*)?(resources?|资源|资料)$/i,

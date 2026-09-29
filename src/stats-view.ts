@@ -1,8 +1,10 @@
 import { ItemView, MarkdownRenderer, TFolder, setIcon } from "obsidian";
 import type { TFile, WorkspaceLeaf, ViewStateResult } from "obsidian";
 import type ParaNavigatorPlugin from "./main";
+import type { HomeSection } from "./main";
 import { renderIconValue } from "./pickers";
 import { getTaskMeta, collectTaskNotes, toggleTaskDone, formatDueShort, todayKey } from "./tasks-view";
+import { collectActiveProjects } from "./projects";
 
 export const VIEW_TYPE_STATS = "para-folder-stats";
 
@@ -10,8 +12,10 @@ interface StatsViewState {
   folderPath?: string;
   name?: string;
   icon?: string;
-  /** 主页模式：聚合全部 PARA 文件夹的总览 */
+  /** 主页模式：只显示任务 + 项目两个板块 */
   home?: boolean;
+  /** 主页滚动锚点：导航栏「主页」子行跳转用 */
+  section?: HomeSection;
 }
 
 interface FileMetrics {
@@ -196,12 +200,9 @@ export class StatsView extends ItemView {
     }
   }
 
-  /** 主页看板：聚合全部 PARA 文件夹的总览 + 今日任务。 */
+  /** 主页看板：两个板块——今天到期的任务 + 进行中的项目。 */
   private async renderHome(container: HTMLElement): Promise<void> {
     const folders = this.plugin.settings.folders;
-    const existing = folders.filter(
-      (f) => this.app.vault.getAbstractFileByPath(f.path) instanceof TFolder
-    );
 
     const header = container.createDiv("para-stats-header");
     const iconEl = header.createSpan("para-stats-icon");
@@ -219,40 +220,18 @@ export class StatsView extends ItemView {
         void this.refresh();
       }
     });
-    header.createDiv({ cls: "para-stats-path", text: "全部 PARA 文件夹总览" });
+    header.createDiv({ cls: "para-stats-path", text: "今天到期任务 · 进行中项目" });
 
-    let noteCount = 0;
-    let subfolderCount = 0;
-    let totalWords = 0;
-    let totalBytes = 0;
-    const perFolder: { config: (typeof folders)[number]; stats: FolderStats }[] = [];
-    for (const config of existing) {
-      const stats = await this.collectStats(config.path);
-      perFolder.push({ config, stats });
-      noteCount += stats.noteCount;
-      subfolderCount += stats.subfolderCount;
-      totalWords += stats.totalWords;
-      totalBytes += stats.totalBytes;
-    }
-
+    // 板块一：任务——今天到期的未完成任务（含逾期），可直接勾选
     const tasks = collectTaskNotes(this.app, folders);
-    const openCount = tasks.filter((t) => !t.done).length;
-
-    const cards = container.createDiv("para-stats-cards");
-    this.renderCard(cards, "file-text", "笔记", String(noteCount));
-    this.renderCard(cards, "folder", "文件夹", String(existing.length));
-    this.renderCard(cards, "whole-word", "字数", totalWords.toLocaleString());
-    this.renderCard(cards, "hard-drive", "大小", this.formatBytes(totalBytes));
-    this.renderCard(cards, "list-todo", "待办任务", String(openCount));
-
-    // 今日任务：逾期 + 今天到期的未完成任务，可直接勾选
     const today = todayKey();
     const dueTasks = tasks
       .filter((t) => !t.done && t.due !== null && t.due <= today)
       .sort((a, b) => (a.due! < b.due! ? -1 : a.due! > b.due! ? 1 : 0));
     const taskSection = container.createDiv("para-stats-section");
+    taskSection.setAttr("data-home-section", "tasks");
     taskSection.createEl("h3", {
-      text: `今日任务${dueTasks.length > 0 ? `（${dueTasks.length}）` : ""}`,
+      text: `任务${dueTasks.length > 0 ? `（${dueTasks.length}）` : ""}`,
     });
     if (dueTasks.length === 0) {
       taskSection.createDiv({ cls: "para-stats-empty", text: "今天没有到期的任务。" });
@@ -284,63 +263,47 @@ export class StatsView extends ItemView {
       }
     }
 
-    // 文件夹一览：点行跳转到该文件夹看板
-    const folderSection = container.createDiv("para-stats-section");
-    folderSection.createEl("h3", { text: "文件夹一览" });
-    const table = folderSection.createEl("table", { cls: "para-stats-table" });
-    const headRow = table.createEl("thead").createEl("tr");
-    for (const label of ["文件夹", "笔记", "待办任务", "最近修改"]) {
-      headRow.createEl("th", { text: label });
-    }
-    const tbody = table.createEl("tbody");
-    for (const { config, stats } of perFolder) {
-      const row = tbody.createEl("tr");
-      row.addClass("para-home-folder-row");
-      row.setAttr("role", "button");
-      row.setAttr("tabindex", "0");
-      row.setAttr("aria-label", `打开「${config.name}」看板`);
-      const open = () => void this.plugin.openFolderDashboard(config);
-      row.addEventListener("click", open);
-      row.addEventListener("keydown", (evt) => {
-        if (evt.key === "Enter" || evt.key === " ") {
-          evt.preventDefault();
-          open();
-        }
+    // 板块二：项目——状态为「进行」的项目（状态存在项目文件夹笔记的 frontmatter）
+    const projectsPath = folders.find((f) => f.id === "projects")?.path;
+    const active = collectActiveProjects(this.app, projectsPath);
+    const projSection = container.createDiv("para-stats-section");
+    projSection.setAttr("data-home-section", "projects");
+    projSection.createEl("h3", {
+      text: `项目${active.length > 0 ? `（${active.length}）` : ""}`,
+    });
+    if (active.length === 0) {
+      const empty = projSection.createDiv("para-stats-empty");
+      empty.createEl("p", { text: "还没有进行中的项目。" });
+      empty.createEl("p", {
+        cls: "para-stats-hint",
+        text: "在「项目」文件夹的子文件夹上点右键，选择「设为进行」即可显示在这里。",
       });
-      row.createEl("td", { text: config.name });
-      row.createEl("td", { text: String(stats.noteCount) });
-      row.createEl("td", { text: String(stats.tasksOpen) });
-      const latest = stats.recent[0]?.file.stat.mtime;
-      row.createEl("td", { text: latest ? this.formatDateTime(latest) : "—" });
-    }
-
-    // 最近修改：横跨全部文件夹
-    const recent = perFolder
-      .flatMap(({ config, stats }) =>
-        stats.recent.map((r) => ({ ...r, folderName: config.name }))
-      )
-      .sort((a, b) => b.file.stat.mtime - a.file.stat.mtime)
-      .slice(0, 10);
-    const recentSection = container.createDiv("para-stats-section");
-    recentSection.createEl("h3", { text: "最近修改" });
-    if (recent.length === 0) {
-      recentSection.createDiv({ cls: "para-stats-empty", text: "还没有笔记。" });
     } else {
-      const recentTable = recentSection.createEl("table", { cls: "para-stats-table" });
-      const recentHead = recentTable.createEl("thead").createEl("tr");
-      for (const label of ["笔记", "所属", "修改时间", "字数"]) {
-        recentHead.createEl("th", { text: label });
-      }
-      const recentBody = recentTable.createEl("tbody");
-      for (const { file, words, folderName } of recent) {
-        const row = recentBody.createEl("tr");
-        const nameCell = row.createEl("td");
-        const link = nameCell.createEl("a", { text: file.basename, cls: "internal-link" });
-        link.setAttr("aria-label", `打开 ${file.basename}`);
-        link.addEventListener("click", () => this.plugin.openFileReusingTab(file));
-        row.createEl("td", { text: folderName });
-        row.createEl("td", { text: this.formatDateTime(file.stat.mtime) });
-        row.createEl("td", { text: String(words) });
+      const list = projSection.createDiv("para-home-projects");
+      for (const { folder, noteCount, latestMtime } of active) {
+        const row = list.createDiv("para-home-project");
+        const nameEl = row.createSpan({ cls: "para-home-project-name", text: folder.name });
+        nameEl.setAttr("role", "button");
+        nameEl.setAttr("tabindex", "0");
+        nameEl.setAttr("aria-label", `打开项目 ${folder.name} 的笔记`);
+        const openProject = async () => {
+          const note = await this.plugin.ensureFolderNote(folder);
+          this.plugin.openFileReusingTab(note);
+        };
+        nameEl.addEventListener("click", () => void openProject());
+        nameEl.addEventListener("keydown", (evt) => {
+          if (evt.key === "Enter" || evt.key === " ") {
+            evt.preventDefault();
+            void openProject();
+          }
+        });
+        row.createSpan({ cls: "para-task-source", text: `${noteCount} 条笔记` });
+        if (latestMtime > 0) {
+          row.createSpan({
+            cls: "para-home-project-latest",
+            text: `最近修改 ${this.formatDateTime(latestMtime)}`,
+          });
+        }
       }
     }
   }

@@ -1,9 +1,13 @@
 import { ItemView, Menu, Notice, FileSystemAdapter, TFile, TFolder, setIcon } from "obsidian";
 import type { TAbstractFile, WorkspaceLeaf } from "obsidian";
 import type ParaNavigatorPlugin from "./main";
+import type { HomeSection } from "./main";
 import { ColorPickerModal, ConfirmModal, IconPickerModal, renderIconValue } from "./pickers";
 import { DEFAULT_SETTINGS } from "./settings";
 import type { ParaFolderConfig } from "./settings";
+import { collectTaskNotes, todayKey } from "./tasks-view";
+import { collectActiveProjects, getProjectStatus, setProjectStatus } from "./projects";
+import type { ProjectStatus } from "./projects";
 
 export const VIEW_TYPE_NAVIGATOR = "para-navigator";
 
@@ -22,6 +26,8 @@ interface DraggedItem {
 export class NavigatorView extends ItemView {
   private readonly plugin: ParaNavigatorPlugin;
   private readonly collapsed = new Set<string>();
+  /** 主页行的展开/折叠状态 */
+  private homeCollapsed = false;
   /** 已展开节点的路径——整树重渲染后依然保留 */
   private readonly expandedSubfolders = new Set<string>();
   /** 内联新建笔记的目标文件夹路径（如有） */
@@ -82,10 +88,12 @@ export class NavigatorView extends ItemView {
 
   /**
    * 导航栏顶部的「主页」入口：与下方 PARA 文件夹行完全相同的行样式
-   * （图标 + 名称 + 计数），点整行打开主页看板（全库总览 + 今日任务）。
+   * （折叠小三角 + 图标 + 名称 + 计数），点整行打开主页看板。
+   * 展开后显示两个子行：任务 / 项目，点击跳转到主页看板的对应板块。
    * 计数为全部已映射 PARA 文件夹的笔记总数。
    */
   private renderHomeNode(): HTMLElement {
+    const section = createDiv("para-folder");
     const folders = this.plugin.settings.folders;
     let total = 0;
     for (const folder of folders) {
@@ -95,10 +103,32 @@ export class NavigatorView extends ItemView {
           .filter((file) => file.path.startsWith(`${folder.path}/`)).length;
       }
     }
-    const row = createDiv("para-folder-header");
+    const isExpanded = !this.homeCollapsed;
+    const row = section.createDiv("para-folder-header");
     row.setAttr("role", "button");
     row.setAttr("tabindex", "0");
+    row.setAttr("aria-expanded", String(isExpanded));
     row.setAttr("aria-label", `主页，共 ${total} 条笔记，点击打开主页看板`);
+
+    // 折叠小三角：与其他文件夹行对齐，切换任务/项目子行的显隐。
+    const chevron = row.createSpan("para-folder-chevron");
+    chevron.setAttr("role", "button");
+    chevron.setAttr("tabindex", "0");
+    chevron.setAttr("aria-label", isExpanded ? "折叠" : "展开");
+    setIcon(chevron, isExpanded ? "chevron-down" : "chevron-right");
+    const toggleExpand = (evt: Event) => {
+      evt.stopPropagation();
+      this.homeCollapsed = !this.homeCollapsed;
+      this.render();
+    };
+    chevron.addEventListener("click", toggleExpand);
+    chevron.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        toggleExpand(evt);
+      }
+    });
+
     const icon = row.createSpan("para-folder-icon");
     setIcon(icon, "home");
     row.createSpan({ cls: "para-folder-name", text: "主页" });
@@ -111,7 +141,51 @@ export class NavigatorView extends ItemView {
         open();
       }
     });
+
+    if (isExpanded) {
+      const body = section.createDiv("para-folder-body");
+      body.appendChild(this.renderHomeChildRow("任务", "list-todo", "tasks"));
+      body.appendChild(this.renderHomeChildRow("项目", "rocket", "projects"));
+    }
+    return section;
+  }
+
+  /** 主页的子行：点击打开主页看板并滚动到对应板块。 */
+  private renderHomeChildRow(label: string, iconName: string, target: HomeSection): HTMLElement {
+    const row = createDiv("para-tree-row");
+    row.setAttr("role", "button");
+    row.setAttr("tabindex", "0");
+    // 占位符让标签与有真实箭头的行保持对齐。
+    row.appendChild(createSpan("para-tree-chevron para-chevron-hidden"));
+    const iconEl = row.createSpan("para-tree-icon");
+    setIcon(iconEl, iconName);
+    row.createSpan({ cls: "para-tree-label", text: label });
+    const count = target === "tasks" ? this.countDueTasks() : this.countActiveProjects();
+    if (count > 0) row.createSpan({ cls: "para-folder-count", text: String(count) });
+    row.setAttr("aria-label", `${label}，点击打开主页看板的${label}板块`);
+    const open = () => void this.plugin.openHomeDashboard(target);
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        open();
+      }
+    });
     return row;
+  }
+
+  /** 今天到期的未完成任务数（含逾期），供主页「任务」子行计数。 */
+  private countDueTasks(): number {
+    const today = todayKey();
+    return collectTaskNotes(this.app, this.plugin.settings.folders).filter(
+      (t) => !t.done && t.due !== null && t.due <= today
+    ).length;
+  }
+
+  /** 进行中的项目数，供主页「项目」子行计数。 */
+  private countActiveProjects(): number {
+    const projectsPath = this.plugin.settings.folders.find((f) => f.id === "projects")?.path;
+    return collectActiveProjects(this.app, projectsPath).length;
   }
 
   private renderOnboarding(): HTMLElement {
@@ -398,6 +472,24 @@ export class NavigatorView extends ItemView {
 
   private showFolderNodeMenu(evt: MouseEvent, folder: TFolder): void {
     const menu = new Menu();
+    // 「项目」文件夹的直接子文件夹 = 项目，可设置状态（主页只显示「进行」中的项目）。
+    const projectsPath = this.plugin.settings.folders.find((f) => f.id === "projects")?.path;
+    if (projectsPath && folder.parent?.path === projectsPath) {
+      const current = getProjectStatus(this.app, folder);
+      menu.addItem((item) =>
+        item
+          .setTitle(`设为「进行」${current === "进行" ? " ✓" : ""}`)
+          .setIcon("rocket")
+          .onClick(() => void this.applyProjectStatus(folder, "进行"))
+      );
+      menu.addItem((item) =>
+        item
+          .setTitle(`设为「计划」${current === "计划" ? " ✓" : ""}`)
+          .setIcon("calendar-clock")
+          .onClick(() => void this.applyProjectStatus(folder, "计划"))
+      );
+      menu.addSeparator();
+    }
     menu.addItem((item) =>
       item.setTitle("创建下一级文件").setIcon("file-plus").onClick(() => this.startCreate(folder.path))
     );
@@ -471,6 +563,17 @@ export class NavigatorView extends ItemView {
     );
     this.addAppearanceItems(menu, file.path, this.nodeIconAccessor(file.path));
     menu.showAtMouseEvent(evt);
+  }
+
+  /** 设置项目状态：写入项目文件夹笔记的 frontmatter，视图经 metadataCache 事件自动刷新。 */
+  private async applyProjectStatus(folder: TFolder, status: ProjectStatus): Promise<void> {
+    await setProjectStatus(
+      this.app,
+      (f) => this.plugin.ensureFolderNote(f),
+      folder,
+      status
+    );
+    new Notice(`「${folder.name}」已设为「${status}」`);
   }
 
   /** Delete goes through a confirmation; the file still lands in the system trash. */

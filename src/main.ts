@@ -13,6 +13,9 @@ import { detectParaPaths } from "./para-detect";
 import { DEFAULT_SETTINGS } from "./settings";
 import type { ParaFolderConfig, ParaNavigatorSettings } from "./settings";
 
+/** 主页看板的板块锚点：导航栏「主页」子行点击后滚动到对应板块。 */
+export type HomeSection = "tasks" | "projects";
+
 export default class ParaNavigatorPlugin extends Plugin {
   settings!: ParaNavigatorSettings;
   private prevNewFileLocation: unknown = null;
@@ -22,7 +25,10 @@ export default class ParaNavigatorPlugin extends Plugin {
     const data = (await this.loadData()) as Partial<ParaNavigatorSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
 
-    // 将分类解析为库中实际使用的名称（"收件箱"、"0-收件箱" 等）。
+    // 「收件箱」→「收集」：老用户无缝迁移（0.1.2 起）。
+    await this.migrateInboxToCollect();
+
+    // 将分类解析为库中实际使用的名称（"收集"、"0-收集" 等）。
     // 只读：检测绝不创建、重命名或删除库内容。
     if (detectParaPaths(this.app, this.settings)) {
       await this.saveData(this.settings);
@@ -71,7 +77,32 @@ export default class ParaNavigatorPlugin extends Plugin {
     }
   }
 
-  /** 原生的"新建笔记"会落到收件箱，而不是库根目录。 */
+  /**
+   * 「收件箱」→「收集」迁移：显示名直接改；磁盘上的收件箱文件夹在无重名冲突时
+   * 一并重命名为「收集」（笔记内链由 fileManager 自动更新）。
+   * 用户自定义过的名称/路径（≠"收件箱"）一律不动。
+   */
+  private async migrateInboxToCollect(): Promise<void> {
+    const inbox = this.settings.folders.find((folder) => folder.id === "inbox");
+    if (!inbox) return;
+    let changed = false;
+    if (inbox.name === "收件箱") {
+      inbox.name = "收集";
+      changed = true;
+    }
+    if (inbox.path === "收件箱") {
+      const oldFolder = this.app.vault.getAbstractFileByPath("收件箱");
+      const clash = this.app.vault.getAbstractFileByPath("收集");
+      if (oldFolder instanceof TFolder && !(clash instanceof TFolder)) {
+        await this.app.fileManager.renameFile(oldFolder, "收集");
+      }
+      inbox.path = "收集";
+      changed = true;
+    }
+    if (changed) await this.saveData(this.settings);
+  }
+
+  /** 原生的"新建笔记"会落到收集，而不是库根目录。 */
   private setInboxAsNewFileLocation(): void {
     const inbox = this.settings.folders.find((folder) => folder.id === "inbox");
     if (!inbox) return;
@@ -255,9 +286,20 @@ export default class ParaNavigatorPlugin extends Plugin {
     });
   }
 
-  /** 打开主页看板：全库总览 + 今日任务，与文件夹看板共用同一个标签页。 */
-  async openHomeDashboard(): Promise<void> {
-    await this.openStats({ home: true, name: "主页", icon: "home" });
+  /**
+   * 打开主页看板：任务（今天到期）+ 项目（进行中），与文件夹看板共用同一个标签页。
+   * 传 section 时打开后滚动到对应板块。
+   */
+  async openHomeDashboard(section?: HomeSection): Promise<void> {
+    await this.openStats({ home: true, name: "主页", icon: "home", section });
+    if (section) {
+      // 等看板完成显示后再滚动，避免 setViewState 尚未可见时滚动无效。
+      requestAnimationFrame(() => {
+        const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_STATS)[0];
+        const el = leaf?.view.containerEl.querySelector(`[data-home-section="${section}"]`);
+        el?.scrollIntoView({ block: "start" });
+      });
+    }
   }
 
   private async openStats(state: {
@@ -265,6 +307,7 @@ export default class ParaNavigatorPlugin extends Plugin {
     name?: string;
     icon?: string;
     home?: boolean;
+    section?: HomeSection;
   }): Promise<void> {
     // 看板全局只保留一个标签页：已打开就直接切换内容，绝不叠加新选项卡。
     // 未映射的文件夹也允许进入——看板会显示引导，
