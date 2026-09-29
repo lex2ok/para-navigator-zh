@@ -689,6 +689,12 @@
   flex: 1;
 }
 
+.para-quickadd-hint {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin: var(--size-4-2) 0;
+}
+
 /* 任务重复徽标（可点击切换） */
 .para-task-repeat {
   font-size: var(--font-ui-smaller);

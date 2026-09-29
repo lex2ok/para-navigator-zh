@@ -5,7 +5,6 @@ import type { HomeSection } from "./main";
 import { ColorPickerModal, ConfirmModal, IconPickerModal, renderIconValue } from "./pickers";
 import { DEFAULT_SETTINGS } from "./settings";
 import type { ParaFolderConfig } from "./settings";
-import { collectTaskNotes, todayKey } from "./tasks-view";
 import { collectActiveProjects, getProjectStatus, setProjectStatus } from "./projects";
 import type { ProjectStatus } from "./projects";
 
@@ -160,7 +159,8 @@ export class NavigatorView extends ItemView {
     const iconEl = row.createSpan("para-tree-icon");
     setIcon(iconEl, iconName);
     row.createSpan({ cls: "para-tree-label", text: label });
-    const count = target === "tasks" ? this.countDueTasks() : this.countActiveProjects();
+    const count =
+      target === "tasks" ? this.plugin.todoDueTodayCount : this.countActiveProjects();
     if (count > 0) row.createSpan({ cls: "para-folder-count", text: String(count) });
     row.setAttr("aria-label", `${label}，点击打开主页看板的${label}板块`);
     const open = () => void this.plugin.openHomeDashboard(target);
@@ -174,12 +174,9 @@ export class NavigatorView extends ItemView {
     return row;
   }
 
-  /** 今天到期的未完成任务数（含逾期），供主页「任务」子行计数。 */
-  private countDueTasks(): number {
-    const today = todayKey();
-    return collectTaskNotes(this.app, this.plugin.settings.folders).filter(
-      (t) => !t.done && t.due !== null && t.due <= today
-    ).length;
+  /** 供插件在待办数据就绪后刷新计数。 */
+  refreshCounts(): void {
+    this.render();
   }
 
   /** 进行中的项目数，供主页「项目」子行计数。 */

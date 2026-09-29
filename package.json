@@ -1,6 +1,6 @@
 {
   "name": "para-navigator",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "基于 PARA 的 Obsidian 侧边栏导航器。",
   "private": true,
   "type": "module",

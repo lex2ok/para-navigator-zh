@@ -3,7 +3,15 @@ import type { TFile, WorkspaceLeaf, ViewStateResult } from "obsidian";
 import type ParaNavigatorPlugin from "./main";
 import type { HomeSection } from "./main";
 import { renderIconValue } from "./pickers";
-import { getTaskMeta, collectTaskNotes, toggleTaskDone, formatDueShort, todayKey } from "./tasks-view";
+import {
+  collectTodoItems,
+  findTodoNote,
+  formatDueShort,
+  stripTodoAutoBlock,
+  todayKey,
+  toggleTodoItem,
+} from "./todo";
+import type { TodoItem } from "./todo";
 import { collectActiveProjects } from "./projects";
 
 export const VIEW_TYPE_STATS = "para-folder-stats";
@@ -222,12 +230,12 @@ export class StatsView extends ItemView {
     });
     header.createDiv({ cls: "para-stats-path", text: "今天到期任务 · 进行中项目" });
 
-    // 板块一：任务——今天到期的未完成任务（含逾期），可直接勾选
-    const tasks = collectTaskNotes(this.app, folders);
+    // 板块一：任务——今天到期的未完成待办条目（含逾期），可直接勾选
+    const items = await collectTodoItems(this.app, folders);
     const today = todayKey();
-    const dueTasks = tasks
-      .filter((t) => !t.done && t.due !== null && t.due <= today)
-      .sort((a, b) => (a.due! < b.due! ? -1 : a.due! > b.due! ? 1 : 0));
+    const dueTasks = items
+      .filter((t) => !t.checked && t.date !== null && t.date <= today)
+      .sort((a, b) => (a.date! < b.date! ? -1 : a.date! > b.date! ? 1 : 0));
     const taskSection = container.createDiv("para-stats-section");
     taskSection.setAttr("data-home-section", "tasks");
     taskSection.createEl("h3", {
@@ -240,12 +248,12 @@ export class StatsView extends ItemView {
       for (const task of dueTasks) {
         const row = list.createDiv("para-home-task");
         const check = row.createEl("input", { type: "checkbox" });
-        check.setAttr("aria-label", `完成 ${task.title}`);
-        check.addEventListener("change", () => void toggleTaskDone(this.app, task));
-        const title = row.createSpan({ cls: "para-home-task-title", text: task.title });
+        check.setAttr("aria-label", `完成 ${task.text}`);
+        check.addEventListener("change", () => void toggleTodoItem(this.app, task));
+        const title = row.createSpan({ cls: "para-home-task-title", text: task.text });
         title.setAttr("role", "button");
         title.setAttr("tabindex", "0");
-        title.setAttr("aria-label", `打开 ${task.title}`);
+        title.setAttr("aria-label", `打开 ${task.text}`);
         const openFile = () => void this.plugin.openFileReusingTab(task.file);
         title.addEventListener("click", openFile);
         title.addEventListener("keydown", (evt) => {
@@ -254,12 +262,12 @@ export class StatsView extends ItemView {
             openFile();
           }
         });
-        const overdue = task.due! < today;
+        const overdue = task.date! < today;
         row.createSpan({
           cls: `para-home-task-due${overdue ? " is-overdue" : ""}`,
-          text: overdue ? `逾期 ${formatDueShort(task.due!)}` : "今天",
+          text: overdue ? `逾期 ${formatDueShort(task.date!)}` : "今天",
         });
-        row.createSpan({ cls: "para-task-source", text: task.folderName });
+        row.createSpan({ cls: "para-task-source", text: task.file.basename });
       }
     }
 
@@ -333,6 +341,7 @@ export class StatsView extends ItemView {
     let totalBytes = 0;
     let tasksOpen = 0;
     let tasksDone = 0;
+    const todoNote = findTodoNote(this.app);
 
     for (const file of files) {
       totalBytes += file.stat.size;
@@ -349,22 +358,18 @@ export class StatsView extends ItemView {
         tagCounts[key] = (tagCounts[key] ?? 0) + 1;
       }
 
-      const taskMeta = getTaskMeta(this.app, file);
-      const content = await this.app.vault.cachedRead(file);
+      let content = await this.app.vault.cachedRead(file);
+      // 待办笔记：只统计手工条目，汇总区是其他笔记的镜像，不重复计数
+      if (todoNote !== null && file.path === todoNote.path) {
+        content = stripTodoAutoBlock(content);
+      }
       const words = content.split(/\s+/).filter((word) => word.length > 0).length;
       totalWords += words;
-      if (taskMeta) {
-        // 任务笔记：按 frontmatter 的完成状态计数，不再数里面的复选框，避免重复
-        if (taskMeta.done) tasksDone++;
-        else tasksOpen++;
-        metrics.set(file.path, { words, tasksOpen: 0, tasksDone: 0 });
-      } else {
-        const open = (content.match(/^\s*[-*+] \[ \]/gm) ?? []).length;
-        const done = (content.match(/^\s*[-*+] \[x\]/gim) ?? []).length;
-        tasksOpen += open;
-        tasksDone += done;
-        metrics.set(file.path, { words, tasksOpen: open, tasksDone: done });
-      }
+      const open = (content.match(/^\s*[-*+] \[ \]/gm) ?? []).length;
+      const done = (content.match(/^\s*[-*+] \[x\]/gim) ?? []).length;
+      tasksOpen += open;
+      tasksDone += done;
+      metrics.set(file.path, { words, tasksOpen: open, tasksDone: done });
     }
 
     const recent = files
